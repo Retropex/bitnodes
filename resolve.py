@@ -162,10 +162,10 @@ class Resolve(object):
         """
         hostname = address
         try:
-            with gevent.Timeout(3):
+            with gevent.Timeout(60):
                 hostname = socket.gethostbyaddr(address)[0]
         except (socket.gaierror, socket.herror, gevent.Timeout) as err:
-            logging.debug("%s: %s", address, err)
+            logging.info("%s: %s", address, err)
         return hostname
 
     def raw_geoip(self, address):
@@ -250,7 +250,9 @@ def cron():
 
             addresses = set([json.loads(node)[0] for node in nodes])
             resolve = Resolve(addresses=addresses, redis_conn=redis_conn)
-            resolve.resolve_addresses()
+
+            # Resolve addresses in background.
+            gevent.spawn(resolve.resolve_addresses)
 
             redis_conn.publish(publish_key, timestamp)
 
