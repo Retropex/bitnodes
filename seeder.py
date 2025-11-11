@@ -38,8 +38,9 @@ import sys
 import time
 from collections import defaultdict
 from configparser import ConfigParser
+from itertools import combinations
 
-from protocol import ONION_SUFFIX
+from protocol import NODE_NETWORK, ONION_SUFFIX, SERVICES
 from utils import init_logger, new_redis_conn
 
 CONF = {}
@@ -59,6 +60,13 @@ class Seeder(object):
         self.addresses = defaultdict(list)
         self.now = 0
 
+        # Generate zone files based on these combinations of services.
+        self.services = [
+            sum(c)
+            for r in range(1, len(SERVICES) + 1)
+            for c in combinations(SERVICES, r)
+        ]
+
     def export_nodes(self, dump):
         """
         Export nodes to generate A and AAAA records from the latest snapshot.
@@ -73,9 +81,9 @@ class Seeder(object):
             if len(self.nodes) == 0:
                 logging.warning("Empty %s", dump)
                 return
-            self.addresses = defaultdict(list)
+            self.addresses = defaultdict(set)
             for address, services in self.filter_nodes():
-                self.addresses[services].append(address)
+                self.addresses[services].add(address)
             self.dump = dump
         self.save_zone_files()
 
@@ -92,10 +100,10 @@ class Seeder(object):
                 # Default zone should include all nodes that have at least
                 # NODE_NETWORK service bit set.
                 zone_file = CONF["zone_file"]
-                addresses = []
+                addresses = set()
                 for services, addrs in self.addresses.items():
-                    if services & 1 == 1:  # NODE_NETWORK
-                        addresses.extend(addrs)
+                    if services & NODE_NETWORK == NODE_NETWORK:
+                        addresses.update(addrs)
             else:
                 zone_file = os.path.join(zone_dir, "x%x.%s" % (i, default_zone))
                 addresses = self.addresses[i]
@@ -175,7 +183,6 @@ class Seeder(object):
             address = node[0]
             port = node[1]
             age = self.now - node[4]
-            services = node[5]
             height = node[6]
             asn = node[13]
             if port != CONF["port"] or asn is None or age < min_age:
@@ -184,7 +191,9 @@ class Seeder(object):
                 continue
             if asn in asns and not address.endswith(ONION_SUFFIX):
                 continue
-            yield address, services
+            for services in self.services:
+                if node[5] & services == services:
+                    yield address, services
             asns.add(asn)
 
     def get_consensus_height(self):
@@ -194,7 +203,7 @@ class Seeder(object):
         height = self.redis_conn.get("height")
         if height:
             height = int(height)
-        logging.debug("Consensus height: %d", height)
+            logging.debug("Consensus height: %d", height)
         return height
 
     def get_min_age(self):

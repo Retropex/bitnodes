@@ -14,6 +14,8 @@ See [Provisioning Bitcoin Network Crawler](https://github.com/ayeowch/bitnodes/w
 
 * [ASN Health](https://bitnodes.io/nodes/asns/)
 
+* [DNS Seeders Health](https://bitnodes.io/seeders/)
+
 * [Charts](https://bitnodes.io/dashboard/)
 
 * [Live Map](https://bitnodes.io/nodes/live-map/)

@@ -21,5 +21,7 @@ def test_seeder(mock_get_consensus_height, mock_save_zone_file):
     )
 
     seeder = Seeder()
+    assert len(seeder.services) == 63
     seeder.export_nodes(json_filepath)
-    assert mock_save_zone_file.call_count == 19
+    assert len(seeder.addresses.keys()) == 35
+    assert mock_save_zone_file.call_count == 36
