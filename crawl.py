@@ -48,6 +48,7 @@ import gevent
 import redis.connection
 from binascii import hexlify, unhexlify
 from geoip2.errors import AddressNotFoundError
+from gevent.lock import Semaphore
 
 from protocol import (
     CJDNS_NETWORK,
@@ -76,8 +77,8 @@ redis.connection.socket = gevent.socket
 
 CONF = {}
 
-# MaxMind databases
 ASN = geoip2.database.Reader(GeoIp.asn_db)
+ASN_LOCK = Semaphore()
 
 
 def getaddr(conn):
@@ -539,6 +540,12 @@ def cache_clear():
     """
     Clear stale process-level cache.
     """
+    global ASN
+
+    with ASN_LOCK:
+        ASN.close()
+        ASN = geoip2.database.Reader(GeoIp.asn_db)
+
     logging.debug("Old cache stats: %s", is_excluded.cache_info())
     is_excluded.cache_clear()
     CONF["cache_version"] += 1
@@ -586,7 +593,8 @@ def is_excluded(address):
     asn = None
     if include_asns or exclude_asns:
         try:
-            asn_record = ASN.asn(address)
+            with ASN_LOCK:
+                asn_record = ASN.asn(address)
         except AddressNotFoundError:
             asn = None
         else:

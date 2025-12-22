@@ -71,11 +71,11 @@ class CacheInv(Cache):
 
     @staticmethod
     @cache
-    def node_key(node):
+    def node_key(address, port):
         """
         Encode a tuple of address and port in shorten key for storage in Redis.
         """
-        return mmh3.mmh3_x64_128_digest(f"{node[0]}-{node[1]}".encode()).hex()[:16]
+        return mmh3.mmh3_x64_128_digest(f"{address}-{port}".encode()).hex()[:16]
 
     def cache_messages(self):
         """
@@ -101,14 +101,16 @@ class CacheInv(Cache):
             node = json.loads(onion_node)
 
         if msg["command"] == b"inv":
-            if tor_proxy and not CONF["onion"]:
-                return  # Not caching invs from .onion node.
-
             for inv in msg["inventory"]:
+                type = inv["type"]
+                if type not in (1, 2):
+                    continue
+                if tor_proxy and not CONF[f"onion_inv_{type}"]:
+                    continue  # Not caching invs from .onion node.
                 self.cache_inv(
                     node,
                     timestamp,
-                    inv["type"],
+                    type,
                     inv["hash"].decode(),
                 )
 
@@ -140,9 +142,6 @@ class CacheInv(Cache):
         """
         Cache inv message from the specified node.
         """
-        if type not in (1, 2):
-            return
-
         if type == 2 and hash[-16:] in CONF["blockhash_suffixes"]:
             return
 
@@ -176,7 +175,7 @@ class CacheInv(Cache):
         # than the current score. This flag doesn't prevent adding new
         # elements.
         self.redis_pipe.execute_command(
-            "ZADD", key, "LT", timestamp, self.node_key(node)
+            "ZADD", key, "LT", timestamp, self.node_key(*node)
         )
 
         # Set expiry for block invs.
@@ -309,7 +308,8 @@ def init_conf(config):
     CONF["inv_1_sampling_rate"] = conf.getint("cache_inv", "inv_1_sampling_rate")
     CONF["inv_2_sampling_rate"] = conf.getint("cache_inv", "inv_2_sampling_rate")
 
-    CONF["onion"] = conf.getboolean("cache_inv", "onion")
+    CONF["onion_inv_1"] = conf.getboolean("cache_inv", "onion_inv_1")
+    CONF["onion_inv_2"] = conf.getboolean("cache_inv", "onion_inv_2")
     CONF["tor_proxies"] = set(ip_port_list(conf_list(conf, "cache_inv", "tor_proxies")))
 
     CONF["pcap_dir"] = conf.get("cache_inv", "pcap_dir")

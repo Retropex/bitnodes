@@ -116,14 +116,13 @@ class Export(object):
             height = (self.heights[n],)
         else:
             height = (0,) if height is None else (int(height),)
-            logging.debug("Using handshake height %s: %d", node, height)
+            logging.debug("Using handshake height %s: %s", node, height)
 
         hostname = (hostname.decode(),) if hostname else (None,)
 
         if geoip is None:
             # resolve.py may not have seen this node in opendata yet when
             # it last ran, so manually trigger raw geoip now.
-            logging.warning("Raw geoip triggered for %s", address)
             geoip = Resolve().raw_geoip(address)
         else:
             geoip = tuple(json.loads(geoip))
@@ -138,15 +137,17 @@ class Export(object):
         recent_blocks = []
         timestamp_ms = self.timestamp * 1000
 
+        # Consensus height from previous export.
+        prev_height = int(self.redis_conn.get("height") or 0)
+
         response = http_get(CONF["block_heights_url"])
         if response is not None:
             recent_blocks = response.json()["blocks"]
 
         for block in recent_blocks:
             block_height, block_time, block_hash = block
-            if block_time > self.timestamp:
+            if block_height < prev_height - 3:
                 continue
-
             key = f"binv:{block_hash}"
             # [('ADDRESS-PORT', EPOCH_MS),..]
             nodes = self.redis_conn.zrangebyscore(
@@ -155,10 +156,15 @@ class Export(object):
             for node in nodes:
                 n, t = node
                 n = n.decode()
-                if n not in heights and t <= timestamp_ms:
+                # Reject if t is over timestamp_ms by 60000 ms.
+                if n not in heights and t <= timestamp_ms + 60000:
                     heights[n] = block_height
 
-        logging.info("Heights: %d", len(heights))
+        logging.info(
+            "Heights: %d (s=%.2f)",
+            len(heights),
+            time.monotonic() - self.start_t,
+        )
         return heights
 
     def write_json_file(self, rows):

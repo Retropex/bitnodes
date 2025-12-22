@@ -90,6 +90,19 @@ class Keepalive(object):
         user_agent = version_msg.get("user_agent", "")
         services = version_msg.get("services", "")
 
+        # Map local port to .onion node.
+        self.onion_key = None
+        self.onion_key_ttl = self.max_ping_delay * 2
+        if self.node[0].endswith(ONION_SUFFIX):
+            local_port = self.conn.socket.getsockname()[1]
+            remote_port = self.conn.proxy[1]
+            self.onion_key = f"onion:{local_port}:{remote_port}"
+            self.redis_conn.set(
+                self.onion_key,
+                json.dumps(self.conn.to_addr),
+                ex=self.onion_key_ttl,
+            )
+
         # Open connections are tracked in open set with the associated data
         # stored in opendata set in Redis.
         self.data = self.node + (version, user_agent, self.start_time, services)
@@ -136,8 +149,16 @@ class Keepalive(object):
         logging.debug("%s (%d)", self.node, nonce)
 
         key = f"ping:{self.node[0]}-{self.node[1]}:{nonce}"
-        self.redis_conn.lpush(key, int(self.last_ping * 1000))  # milliseconds
-        self.redis_conn.expire(key, CONF["rtt_ttl"])
+        self.redis_pipe.lpush(key, int(self.last_ping * 1000))  # milliseconds
+        self.redis_pipe.expire(key, CONF["rtt_ttl"])
+
+        if self.onion_key is not None:
+            self.redis_pipe.expire(self.onion_key, self.onion_key_ttl)
+
+        # Refresh timestamp in opendata set.
+        self.redis_pipe.zadd("opendata", {json.dumps(self.data): int(now)})
+
+        self.redis_pipe.execute()
 
         try:
             self.ping_delay = min(
@@ -149,9 +170,6 @@ class Keepalive(object):
             )
         except TypeError:
             pass
-
-        # Refresh timestamp in opendata set.
-        self.redis_conn.zadd("opendata", {json.dumps(self.data): int(now)})
 
         return True
 
@@ -346,14 +364,6 @@ class ConnectionManager(object):
                 self.decrement_cidr_key()
             self.redis_conn.delete(self.node_key)
             return
-
-        # Map local port to .onion node.
-        if self.address.endswith(ONION_SUFFIX):
-            local_port = conn.socket.getsockname()[1]
-            remote_port = self.proxy[1]
-            self.redis_conn.set(
-                f"onion:{local_port}:{remote_port}", json.dumps(conn.to_addr)
-            )
 
         Keepalive(
             conn=conn,
