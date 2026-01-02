@@ -144,10 +144,19 @@ class Export(object):
         if response is not None:
             recent_blocks = response.json()["blocks"]
 
+        now = time.time()
+        logging.info("Timestamp age: %.2f", now - self.timestamp)
+
         for block in recent_blocks:
             block_height, block_time, block_hash = block
             if block_height < prev_height - 3:
                 continue
+            logging.info(
+                "Block %d (%s) age: %.2f",
+                block_height,
+                block_hash,
+                now - block_time,
+            )
             key = f"binv:{block_hash}"
             # [('ADDRESS-PORT', EPOCH_MS),..]
             nodes = self.redis_conn.zrangebyscore(
